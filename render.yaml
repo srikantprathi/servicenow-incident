@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: servicenow-incident-mcp
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: SERVICENOW_INSTANCE_URL
+        value: https://inmorphisservicespvtltddemo16.service-now.com
+      - key: SERVICENOW_USERNAME
+        sync: false        # set in the Render dashboard (secret)
+      - key: SERVICENOW_PASSWORD
+        sync: false        # set in the Render dashboard (secret)
+      - key: MCP_BEARER_TOKEN
+        generateValue: true  # Render generates a strong token; copy it from the dashboard
