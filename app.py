@@ -26,6 +26,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
+from mcp.server.transport_security import TransportSecuritySettings
+
 from server import mcp
 
 logger = logging.getLogger("servicenow-mcp.http")
@@ -63,6 +65,31 @@ async def healthz(_request: Request) -> PlainTextResponse:
 # Run statelessly so the server behaves well behind a hosting proxy / single
 # replica without sticky sessions.
 mcp.settings.stateless_http = True
+
+# DNS-rebinding protection only trusts localhost by default, which 421s behind
+# a hosting proxy. Trust the public hostname instead. On Render,
+# RENDER_EXTERNAL_HOSTNAME is provided automatically; MCP_ALLOWED_HOSTS can
+# override (comma-separated). If neither is set, fall back to disabling the
+# check (the bearer token still guards the endpoint).
+_allowed_hosts: list[str] = []
+if os.environ.get("MCP_ALLOWED_HOSTS"):
+    _allowed_hosts = [
+        h.strip() for h in os.environ["MCP_ALLOWED_HOSTS"].split(",") if h.strip()
+    ]
+elif os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
+    _allowed_hosts = [os.environ["RENDER_EXTERNAL_HOSTNAME"]]
+
+if _allowed_hosts:
+    _allowed_hosts += ["localhost", "127.0.0.1", "localhost:8000", "127.0.0.1:8000"]
+    mcp.settings.transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_hosts,
+        allowed_origins=["*"],
+    )
+else:
+    mcp.settings.transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    )
 
 # Build the Streamable HTTP app (this carries the MCP session-manager
 # lifespan), then attach our health route and bearer-auth middleware directly.
