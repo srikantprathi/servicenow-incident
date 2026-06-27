@@ -36,8 +36,37 @@ BEARER_TOKEN = os.environ.get("MCP_BEARER_TOKEN")
 MCP_PATH = "/mcp"
 
 
+def _extract_token(request: Request) -> str | None:
+    """Pull the token from any of the common places a client might put it.
+
+    Accepts, in order:
+      * Authorization: Bearer <token>   (standard)
+      * Authorization: <token>          (raw, no scheme — some UIs do this)
+      * Authorization: Bearer Bearer <token>  (UI double-prefixes)
+      * X-API-Key: <token>
+      * ?token=<token> or ?api_key=<token>  (query string)
+    """
+    header = request.headers.get("authorization", "").strip()
+    if header:
+        # Strip any number of leading "bearer " prefixes, case-insensitively.
+        while header.lower().startswith("bearer "):
+            header = header[len("bearer ") :].strip()
+        if header:
+            return header
+
+    xkey = request.headers.get("x-api-key", "").strip()
+    if xkey:
+        return xkey
+
+    q = request.query_params.get("token") or request.query_params.get("api_key")
+    if q:
+        return q.strip()
+
+    return None
+
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Require ``Authorization: Bearer <token>`` on MCP requests."""
+    """Guard MCP requests with a shared token (multiple header formats OK)."""
 
     async def dispatch(self, request: Request, call_next):
         # Health checks and anything outside the MCP path are unprotected.
@@ -47,9 +76,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if not BEARER_TOKEN:
             return await call_next(request)
 
-        header = request.headers.get("authorization", "")
-        scheme, _, token = header.partition(" ")
-        if scheme.lower() != "bearer" or token != BEARER_TOKEN:
+        if _extract_token(request) != BEARER_TOKEN:
             return JSONResponse(
                 {"error": "unauthorized"},
                 status_code=401,
